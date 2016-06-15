@@ -20,41 +20,41 @@ from koala.ast.Range import RangeCore
 
 if __name__ == '__main__':
 
-    # file = "../engie/data/input/100021224 - Far East - Indonesia - Abadi Gas (Phase 1) - Gas - New Project.xlsx"
-    file = "../engie/data/input/100021268 - North America - United States - Stampede (Pony-Knotty Head) - Oil - New Project.xlsx"
+    file = "../engie/data/input/100021224 - Far East - Indonesia - Abadi Gas (Phase 1) - Gas - New Project.xlsx"
+    # file = "../engie/data/input/100021268 - North America - United States - Stampede (Pony-Knotty Head) - Oil - New Project.xlsx"
 
     print file
 
-    ### Graph Generation ###
-    startTime = datetime.now()
-    c = ExcelCompiler(file, ignore_sheets = ['IHS'])
-    c.clean_volatile()
-    print "___Timing___ %s cells and %s named_ranges parsed in %s" % (str(len(c.cells)-len(c.named_ranges)), str(len(c.named_ranges)), str(datetime.now() - startTime))
+    # ### Graph Generation ###
+    # startTime = datetime.now()
+    # c = ExcelCompiler(file, ignore_sheets = ['IHS'])
+    # c.clean_volatile()
+    # print "___Timing___ %s cells and %s named_ranges parsed in %s" % (str(len(c.cells)-len(c.named_ranges)), str(len(c.named_ranges)), str(datetime.now() - startTime))
     
-    # import cProfile
-    # cProfile.run('sp = c.gen_graph(outputs=["outNPV_Proj"])', 'stats')
+    # # import cProfile
+    # # cProfile.run('sp = c.gen_graph(outputs=["outNPV_Proj"])', 'stats')
 
 
-    sp = c.gen_graph(outputs=["outNPV_Proj"])
-    print "___Timing___ Graph generated in %s" % (str(datetime.now() - startTime))
+    # sp = c.gen_graph(outputs=["outNPV_Proj"])
+    # print "___Timing___ Graph generated in %s" % (str(datetime.now() - startTime))
     
-    ### Graph Pruning ###
-    startTime = datetime.now()
-    sp = sp.prune_graph(["IA_PriceExportGas"])
-    print "___Timing___  Pruning done in %s" % (str(datetime.now() - startTime))
+    # ### Graph Pruning ###
+    # startTime = datetime.now()
+    # sp = sp.prune_graph(["IA_PriceExportGas"])
+    # print "___Timing___  Pruning done in %s" % (str(datetime.now() - startTime))
 
-    ### Graph Serialization ###
-    startTime = datetime.now()
-    sp.dump2(file.replace("xlsx", "gzip").replace("input", "graphs"))
-    print "___Timing___ Graph wrote in %s" % (str(datetime.now() - startTime))
+    # ### Graph Serialization ###
+    # startTime = datetime.now()
+    # sp.dump2(file.replace("xlsx", "gzip").replace("input", "graphs"))
+    # print "___Timing___ Graph wrote in %s" % (str(datetime.now() - startTime))
 
     ### Graph Loading ###
-    startTime = datetime.now()
-    sp = Spreadsheet.load2(file.replace("xlsx", "gzip").replace("input", "graphs"))
-    print "___Timing___ Graph read in %s" % (str(datetime.now() - startTime))
+    # startTime = datetime.now()
+    # sp = Spreadsheet.load2(file.replace("xlsx", "gzip").replace("input", "graphs"))
+    # print "___Timing___ Graph read in %s" % (str(datetime.now() - startTime))
 
-    # import cProfile
-    # cProfile.run('Spreadsheet.load2(file.replace("xlsx", "txt"))', 'stats')
+    import cProfile
+    cProfile.run('sp = Spreadsheet.load2(file.replace("xlsx", "gzip").replace("input", "graphs"))', 'stats')
 
     sys.setrecursionlimit(10000)
 
