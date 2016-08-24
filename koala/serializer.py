@@ -19,8 +19,8 @@ def dump(self, fname):
 
 
     # write simple cells first
-    simple_cells = filter(lambda cell: cell.is_range == False, self.cellmap.values())
-    range_cells = filter(lambda cell: cell.is_range, self.cellmap.values())
+    simple_cells = filter(lambda cell: cell.is_range == False, self.cells.values())
+    range_cells = filter(lambda cell: cell.is_range, self.cells.values())
     compiled_expressions = {}
 
     def parse_cell_info(cell):
@@ -127,12 +127,12 @@ def load(fname):
             mode = "node0"
             continue
         if line == "-----":
-            cellmap_temp = {n.address(): n for n in nodes}
-            Range = RangeFactory(cellmap_temp)
+            cells_temp = {n.address(): n for n in nodes}
+            Range = RangeFactory(cells_temp)
             mode = "node0"
             continue
         elif line == "edges":
-            cellmap = {n.address(): n for n in nodes}
+            cells = {n.address(): n for n in nodes}
             mode = "edges"
             continue
         elif line == "outputs":
@@ -184,7 +184,7 @@ def load(fname):
                 nodes.append(cell)
         elif mode == "edges":
             source, target = line.split(SEP)
-            edges.append((cellmap[source], cellmap[target]))
+            edges.append((cells[source], cells[target]))
         elif mode == "outputs":
             outputs = line.split(SEP)
             if outputs == [""]:
@@ -199,9 +199,9 @@ def load(fname):
 
     G = DiGraph(data = edges)
 
-    print "Graph loading done, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()),len(G.edges()),len(cellmap))
+    print "Graph loading done, %s nodes, %s edges, %s cells entries" % (len(G.nodes()),len(G.edges()),len(cells))
 
-    return (G, cellmap, named_ranges, volatiles, outputs, inputs)
+    return (cells, named_ranges, G, volatiles, inputs, outputs)
 
 ########### based on json #################
 def dump_json(self, fname):
@@ -285,11 +285,11 @@ def load_json(fname):
     data["nodes"] = nodes
 
     G = json_graph.node_link_graph(data)
-    cellmap = {n.address():n for n in G.nodes()}
+    cells = {n.address():n for n in G.nodes()}
 
-    print "Graph loading done, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()),len(G.edges()),len(cellmap))
+    print "Graph loading done, %s nodes, %s edges, %s cells entries" % (len(G.nodes()),len(G.edges()),len(cells))
 
-    return (G, cellmap, data["named_ranges"], data["outputs"], data["inputs"])
+    return (cells, data["named_ranges"], G, data["inputs"], data["outputs"])
 
 
 ########### based on dot #################

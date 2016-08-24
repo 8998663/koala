@@ -352,7 +352,7 @@ def make_subgraph(G, seed, direction = "ascending"):
     return subgraph
 
 
-def cell2code(cell, named_ranges, debug = False):
+def cell2code(cell, named_ranges, debug = False, tokenize_range = False):
     """Generate python code for the given cell"""
     if cell.formula:
 
@@ -364,7 +364,7 @@ def cell2code(cell, named_ranges, debug = False):
         ref = parse_cell_address(cell.address()) if not cell.is_named_range else None
         sheet = cell.sheet
 
-        e = shunting_yard(cell.formula, named_ranges, ref=ref, debug = debug)
+        e = shunting_yard(cell.formula, named_ranges, ref=ref, debug = debug, tokenize_range = tokenize_range)
         
         ast,root = build_ast(e)
         code = root.emit(ast, context=sheet)
@@ -423,33 +423,29 @@ def prepare_volatile(code, names, ref_cell = None):
     }
 
 
-def graph_from_seeds(seeds, cell_source, update = False):
+def graph_from_seeds(seeds, spreadsheet):
     """
     This creates/updates a networkx graph from a list of cells.
-
     """
+    G = spreadsheet.G
+    cells = spreadsheet.cells
+    names = spreadsheet.named_ranges
+    volatiles = spreadsheet.volatiles
 
-    # when called from Spreadsheet instance, use the Spreadsheet cellmap and graph 
-    if update:
-        cellmap = cell_source.cellmap
-        cells = cellmap
-        G = cell_source.G
+    if G:
         for c in seeds: 
             G.add_node(c)
-            cellmap[c.address()] = c
-    # when called from ExcelCompiler instance, construct cellmap and graph from seeds 
-    else: # ~ cell_source is a ExcelCompiler
-        cellmap = dict([(x.address(),x) for x in seeds])
-        cells = cell_source.cells
+            cells[c.address()] = c
+    else:
+        new_cells = dict([(x.address(),x) for x in seeds])
         # directed graph
         G = networkx.DiGraph()
-        # match the info in cellmap
-        for c in cellmap.itervalues(): G.add_node(c)
+        # match the info in new_cells
+        for c in new_cells.itervalues(): G.add_node(c)
 
     # cells to analyze: only formulas
     todo = [s for s in seeds if s.formula]
     steps = [i for i,s in enumerate(todo)]
-    names = cell_source.named_ranges
 
     while todo:
         c1 = todo.pop()
@@ -464,8 +460,8 @@ def graph_from_seeds(seeds, cell_source, update = False):
         c1.python_expression = pystr.replace('"', "'") # compilation is done later
         
         if 'OFFSET' in c1.formula or 'INDEX' in c1.formula:
-            if c1.address() not in cell_source.named_ranges: # volatiles names already treated in ExcelCompiler
-                cell_source.volatiles.add(c1.address())
+            if c1.address() not in names: # volatiles names already treated in ExcelCompiler
+                volatiles.add(c1.address())
 
         # get all the cells/ranges this formula refers to
         deps = [x for x in ast.nodes() if isinstance(x,RangeNode)]
@@ -480,7 +476,7 @@ def graph_from_seeds(seeds, cell_source, update = False):
         #     if dep not in names:
         #         if "!" not in dep and cursheet != None:
         #             dep = cursheet + "!" + dep
-        #     if dep not in cellmap:
+        #     if dep not in new_cells:
         #         tmp.append(dep)
         # #deps = tmp
         # logStep = "%s %s = %s " % ('|'*step, c1.address(), '',)
@@ -505,9 +501,9 @@ def graph_from_seeds(seeds, cell_source, update = False):
                 dep_name = cursheet + "!" + dep_name
 
             # Named_ranges + ranges already parsed (previous iterations)
-            if dep_name in cellmap:
-                origins = [cellmap[dep_name]]
-                target = cellmap[c1.address()]
+            if dep_name in new_cells:
+                origins = [new_cells[dep_name]]
+                target = new_cells[c1.address()]
             # if the dep_name is a multi-cell range, create a range object
             elif is_range(dep_name) or (dep_name in names and is_range(names[dep_name])):
                 if dep_name in names:
@@ -517,7 +513,7 @@ def graph_from_seeds(seeds, cell_source, update = False):
 
                 if 'OFFSET' in reference or 'INDEX' in reference:
                     start_end = prepare_volatile(reference, names, ref_cell = c1)
-                    rng = cell_source.Range(start_end)
+                    rng = spreadsheet.Range(start_end)
 
                     if dep_name in names: # dep is a volatile range
                         address = dep_name 
@@ -526,17 +522,17 @@ def graph_from_seeds(seeds, cell_source, update = False):
                             address = c1.address()
                         else: # a volatile range with no name, its address will be its name
                             address = '%s:%s' % (start_end["start"], start_end["end"])
-                            cell_source.volatiles.add(address)
+                            volatiles.add(address)
                 else:
                     address = dep_name
-                    rng = cell_source.Range(reference)
+                    rng = spreadsheet.Range(reference)
                 
-                if address in cellmap:
-                    virtual_cell = cellmap[address]
+                if address in new_cells:
+                    virtual_cell = new_cells[address]
                 else:
                     virtual_cell = Cell(address, None, value = rng, formula = reference, is_range = True, is_named_range = True )
                     # save the range
-                    cellmap[address] = virtual_cell
+                    new_cells[address] = virtual_cell
 
                 # add an edge from the range to the parent
                 G.add_node(virtual_cell)
@@ -548,10 +544,10 @@ def graph_from_seeds(seeds, cell_source, update = False):
 
                 if len(rng.keys()) != 0: # could be better, but can't check on Exception types here...
                     for child in rng.addresses:
-                        if child not in cellmap:
+                        if child not in new_cells:
                             origins.append(cells[child])  
                         else:
-                            origins.append(cellmap[child])   
+                            origins.append(new_cells[child])   
             else:
                 # not a range 
                 if dep_name in names:
@@ -574,7 +570,7 @@ def graph_from_seeds(seeds, cell_source, update = False):
                     cell = origins[0]
                     
                     if cell.formula is not None and ('OFFSET' in cell.formula or 'INDEX' in cell.formula):
-                        cell_source.volatiles.add(cell.address())
+                        volatiles.add(cell.address())
                 else:
                     virtual_cell = Cell(dep_name, None, value = None, formula = None, is_range = False, is_named_range = True )
                     origins = [virtual_cell]
@@ -586,7 +582,7 @@ def graph_from_seeds(seeds, cell_source, update = False):
             for c2 in flatten(origins):
                 
                 # if we havent treated this cell allready
-                if c2.address() not in cellmap:
+                if c2.address() not in new_cells:
                     if c2.formula:
                         # cell with a formula, needs to be added to the todo list
                         todo.append(c2)
@@ -597,8 +593,8 @@ def graph_from_seeds(seeds, cell_source, update = False):
                         c2.python_expression = pystr
                         c2.compile()  
                                                 
-                    # save in the cellmap
-                    cellmap[c2.address()] = c2
+                    # save in the new_cells
+                    new_cells[c2.address()] = c2
                     # add to the graph
                     G.add_node(c2)
                     
@@ -610,4 +606,4 @@ def graph_from_seeds(seeds, cell_source, update = False):
         c1.compile() # cell compilation is done here because volatile ranges might update python_expressions 
     
 
-    return (cellmap, G)
+    return (new_cells, G)

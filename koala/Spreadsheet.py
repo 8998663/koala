@@ -25,56 +25,54 @@ class Spreadsheet(object):
     #   2) Through a gzip file containing a precalculated graph
     #     sp = Spreadsheet()
     #     sp.loadGraph()
-    def __init__(self, debug = False):
-        self.cells = None
-        self.named_ranges = None
-        self.outputs = []
-        self.inputs = []
-        self.Range = None
-        self.volatiles = None
+    def __init__(self, cells, named_ranges, G = None, volatiles = set(), inputs = set(), outputs = set(), debug = False):
+        self.cells = cells
+        self.named_ranges = named_ranges
+        self.G = G
+        self.volatiles = volatiles
+        self.inputs = outputs
+        self.outputs = inputs
         self.debug = debug 
-        self.G = None
-        self.cellmap = None
+
+        self.volatile_to_remove = ["INDEX", "OFFSET"]
+        self.Range = RangeFactory(cells)
+        
         self.save_history = False
         self.history = dict()
         self.count = 0
-        self.volatile_to_remove = ["INDEX", "OFFSET"]
-        self.Range = None
+        
+        
         self.reset_buffer = set()
-        self.pending = {}
         self.fixed_cells = {}  
 
-    def loadExcel(self, file, ignore_sheets = [], ignore_hidden = False):
+    @staticmethod
+    def load_excel(file, ignore_sheets = [], ignore_hidden = False, debug = False):
         file_name = os.path.abspath(file)
         # Decompose subfiles structure in zip file
         archive = read_archive(file_name)
         # Parse cells
-        self.cells = read_cells(archive, ignore_sheets, ignore_hidden)
+        cells = read_cells(archive, ignore_sheets, ignore_hidden)
         # Parse named_range { name (ExampleName) -> address (Sheet!A1:A10)}
-        self.named_ranges = read_named_ranges(archive)
-        self.Range = RangeFactory(self.cells)
-        self.volatiles = set()
+        named_ranges = read_named_ranges(archive)
 
+        return  Spreadsheet(cells, named_ranges, debug = debug)
+
+    @staticmethod
+    def load_gzip(fname, debug = False):
+        return Spreadsheet(*load(fname), debug = debug)
+
+    @staticmethod
+    def load_json(fname, debug = False):
+        return Spreadsheet(*load_json(fname), debug = debug)
+
+    def dump_json(self, fname):
+        dump_json(self, fname)
+
+    def dump(self, fname):
+        dump(self, fname)
 
     def activate_history(self):
         self.save_history = True
-
-    @property
-    def addr_to_name(self):
-        return {v:k for k,v in self.named_ranges.items()}
-
-    @property
-    def addr_to_range(self):
-        addr_to_range = {}        
-        for c in self.cellmap.values():
-            if c.is_range and len(c.range.keys()) != 0: # could be better, but can't check on Exception types here...
-                addr = c.address() if c.is_named_range else c.range.name
-                for cell in c.range.addresses:
-                    if cell not in addr_to_range:
-                        addr_to_range[cell] = [addr]
-                    else:
-                        addr_to_range[cell].append(addr)
-        return addr_to_range  
 
     def add_cell(self, cell, value = None):
         
@@ -82,19 +80,19 @@ class Spreadsheet(object):
             cell = Cell(cell, None, value = value, formula = None, is_range = False, is_named_range = False)
         
         addr = cell.address()
-        if addr in self.cellmap:
+        if addr in self.cells:
             raise Exception('Cell %s already in cellmap' % addr)
 
         cellmap, G = graph_from_seeds([cell], self, update = True)
 
-        self.cellmap = cellmap
+        self.cells = cellmap
         self.G = G
 
         print "Graph construction updated, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()),len(G.edges()),len(cellmap))
 
     def set_formula(self, addr, formula):
-        if addr in self.cellmap:
-            cell = self.cellmap[addr]
+        if addr in self.cells:
+            cell = self.cells[addr]
         else:
             raise Exception('Cell %s not in cellmap' % addr)
 
@@ -115,13 +113,13 @@ class Spreadsheet(object):
 
         cellmap, G = graph_from_seeds(seeds, self)
 
-        self.cellmap = cellmap
+        self.cells = cellmap
         self.G = G
 
-        should_eval = self.cellmap[addr].should_eval
-        self.cellmap[addr].should_eval = 'always'
+        should_eval = self.cells[addr].should_eval
+        self.cells[addr].should_eval = 'always'
         self.evaluate(addr)
-        self.cellmap[addr].should_eval = should_eval
+        self.cells[addr].should_eval = should_eval
 
         print "Graph construction updated, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()),len(G.edges()),len(cellmap))
 
@@ -134,7 +132,7 @@ class Spreadsheet(object):
         # get all the cells impacted by inputs
         dependencies = set()
         for input_address in self.inputs:
-            child = self.cellmap[input_address]
+            child = self.cells[input_address]
             if child == None:
                 print "Not found ", input_address
                 continue
@@ -147,8 +145,8 @@ class Spreadsheet(object):
         subgraph = networkx.DiGraph()
         new_cellmap = {}
         for output_address in self.outputs:
-            new_cellmap[output_address] = self.cellmap[output_address]
-            seed = self.cellmap[output_address]
+            new_cellmap[output_address] = self.cells[output_address]
+            seed = self.cells[output_address]
             todo = map(lambda n: (seed,n), G.predecessors(seed))
             done = set(todo)
 
@@ -207,7 +205,7 @@ class Spreadsheet(object):
 
                     else:
                         # might need to be changed to actual self.cells Cell, not a copy
-                        virtual_cell = Cell(i, None, value = self.cellmap[reference].value, formula = reference, is_range = False, is_named_range = True)
+                        virtual_cell = Cell(i, None, value = self.cells[reference].value, formula = reference, is_range = False, is_named_range = True)
                         new_cellmap[i] = virtual_cell
                         subgraph.add_node(virtual_cell) # edges are not needed here since the input here is not in the calculation chain
                 else:
@@ -217,18 +215,18 @@ class Spreadsheet(object):
                         new_cellmap[i] = virtual_cell
                         subgraph.add_node(virtual_cell) # edges are not needed here since the input here is not in the calculation chain
                     else:
-                        new_cellmap[i] = self.cellmap[i]
-                        subgraph.add_node(self.cellmap[i]) # edges are not needed here since the input here is not in the calculation chain
+                        new_cellmap[i] = self.cells[i]
+                        subgraph.add_node(self.cells[i]) # edges are not needed here since the input here is not in the calculation chain
 
 
         self.G = subgraph
-        self.cellmap = new_cellmap
+        self.cells = new_cellmap
 
-    def clean_volatile(self, volatiles):
-        print '___### Cleaning Volatiles ###___'
+    def fix_volatiles(self, volatiles):
+        print '___### Fix Volatiles ###___'
 
         new_named_ranges = self.named_ranges.copy()
-        new_cells = self.cellmap.copy()
+        new_cells = self.cells.copy()
 
         ### 1) create ranges
         for n in self.named_ranges:
@@ -236,28 +234,41 @@ class Spreadsheet(object):
             if is_range(reference):
                 if 'OFFSET' not in reference:
                     my_range = self.Range(reference)
-                    self.cellmap[n] = Cell(n, None, value = my_range, formula = reference, is_range = True, is_named_range = True )
+                    self.cells[n] = Cell(n, None, value = my_range, formula = reference, is_range = True, is_named_range = True )
                 else:
-                    self.cellmap[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
+                    self.cells[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
             else:
-                if reference in self.cellmap:
-                    self.cellmap[n] = Cell(n, None, value = self.cellmap[reference].value, formula = reference, is_range = False, is_named_range = True )
+                if reference in self.cells:
+                    self.cells[n] = Cell(n, None, value = self.cells[reference].value, formula = reference, is_range = False, is_named_range = True )
                 else:
-                    self.cellmap[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
+                    self.cells[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
         
        
         ### 2) evaluate all volatiles
         for formula, address, sheet in volatiles:
 
+            debug = False
+            if 'index(resolve_range(self.named_ranges["CA_CapexFacilTopsides"]),1,1):index(resolve_range(self.named_ranges["CA_CapexFacilOther"]),1,self.eval_ref("CA_Periods", ref = (22, "AY")))' in formula:
+                debug = True
+                print 'len', len(replacements)
+
+
             if sheet:
                 parsed = parse_cell_address(address)
             else:
-                parsed = ""
-            e = shunting_yard(formula, self.named_ranges, ref=parsed)
+                successor = self.G.successors(self.cells[address])[0]
+                parsed = parse_cell_address(successor.address())
+                sheet = successor.sheet
+            e = shunting_yard(formula, self.named_ranges, ref = parsed, tokenize_range = True)
             ast,root = build_ast(e)
             code = root.emit(ast)
+            # print "============"
+            # print address, sheet, formula
+            # for c in self.G.successors(self.cells[address]):
+            #     print "    ", c.address()
             cell = {"formula": formula, "address": address, "sheet": sheet}
-            replacements = self.eval_volatiles_from_ast(ast, root, cell)
+            replacements = self.eval_volatiles_from_ast(ast, root, cell, debug)
+
 
             new_formula = formula
             if type(replacements) == list:
@@ -267,24 +278,39 @@ class Spreadsheet(object):
                             print 'WARNING: Excel error found => replacing with #N/A'
                         repl["value"] = "#N/A"
 
+                    if debug:
+                        print 'exprtype', repl["expression_type"]
+
                     if repl["expression_type"] == "value":
+                        if debug:
+                            print 'Value', repl["value"]
                         new_formula = new_formula.replace(repl["formula"], str(repl["value"]))
                     else:
+                        if debug:
+                            print 'Value', repl["value"]
                         new_formula = new_formula.replace(repl["formula"], repl["value"])
             else:
                 new_formula = None
+
+            if debug:
+                print 'Old', formula
+                print 'new', new_formula
 
 
             if address in new_named_ranges:
                 new_named_ranges[address] = new_formula
             else: 
-                old_cell = self.cellmap[address]
-                new_cells[address] = Cell(old_cell.address(), old_cell.sheet, value=old_cell.value, formula=new_formula, is_range = old_cell.is_range, is_named_range=old_cell.is_named_range, should_eval=old_cell.should_eval)
-        
-        self.cells = new_cells
-        self.Range = RangeFactory(self.cells)
-        self.named_ranges = new_named_ranges
-        self.volatiles = self.volatiles.difference(volatiles)
+                old_cell = self.cells[address]
+                if old_cell.is_range:
+                    cell = Cell(old_cell.address(), old_cell.sheet, value=old_cell.range, formula=new_formula, is_range = old_cell.is_range, is_named_range=old_cell.is_named_range, should_eval=old_cell.should_eval)
+                else:
+                    cell = Cell(old_cell.address(), old_cell.sheet, value=old_cell.value, formula=new_formula, is_range = old_cell.is_range, is_named_range=old_cell.is_named_range, should_eval=old_cell.should_eval)
+                pystr, ast = cell2code(cell, self.named_ranges, tokenize_range = True)
+                cell.python_expression = pystr.replace('"', "'")
+                cell.compile()
+                new_cells[address] = cell
+
+        return new_cells, new_named_ranges
 
 
     def print_value_ast(self, ast,node,indent):
@@ -292,9 +318,12 @@ class Spreadsheet(object):
         for c in node.children(ast):
             self.print_value_ast(ast, c, indent+1)
 
-    def eval_volatiles_from_ast(self, ast, node, cell):
+    def eval_volatiles_from_ast(self, ast, node, cell, debug = False):
         results = []
         context = cell["sheet"]
+
+        if debug:
+            print "tvalue ",node.token.tvalue
 
         if (node.token.tvalue == "INDEX" or node.token.tvalue == "OFFSET"):
             volatile_string = reverse_rpn(node, ast)
@@ -309,6 +338,7 @@ class Spreadsheet(object):
                 volatile_value = eval(expression)
             except Exception as e:
                 if self.debug:
+                    print RangeCore.apply("add",RangeCore.apply("substract",self.eval_ref("E70", ref = (122, 'I')),self.eval_ref("year_modelStart", ref = (122, 'I')),(122, 'I')),1,(122, 'I'))
                     print 'EXCEPTION raised in eval_volatiles: EXPR', expression, cell["address"]
                 raise Exception("Problem evalling: %s for %s, %s" % (e, cell["address"], expression))
 
@@ -318,15 +348,23 @@ class Spreadsheet(object):
                 results.append(self.eval_volatiles_from_ast(ast, c, cell))
         return list(flatten(results, only_lists = True))
 
+    def reduce(self, inputs = [], outputs = []):
+        independent_volatiles, all_volatiles = self.detect_alive(inputs, outputs)
+        new_cells, new_named_ranges = self.fix_volatiles(independent_volatiles)
+        self.cells = new_cells
+        self.named_ranges = new_named_ranges
+        for iv in independent_volatiles:
+            self.volatiles.remove(iv[1])
+        self.Range = RangeFactory(new_cells)
 
     def detect_alive(self, inputs = [], outputs = []):
 
         volatile_arguments, all_volatiles = self.find_volatile_arguments(outputs)
 
-        volatiles_not_concerned = all_volatiles.copy()
+        independent_volatiles = all_volatiles.copy()
 
         # go down the tree and list all cells that are volatile arguments
-        todo = [self.cellmap[input] for input in inputs]
+        todo = [self.cells[input] for input in inputs]
         done = set()
 
         volatiles_concerned = set()
@@ -339,8 +377,9 @@ class Spreadsheet(object):
                     for vc in volatile_arguments[cell.address()]:
                         volatiles_concerned.add(vc)
                         try:
-                            volatiles_not_concerned.remove(vc)
+                            independent_volatiles.remove(vc)
                         except:
+                            print "WARNING could not remove from independent_volatiles"
                             pass
 
                 for child in self.G.successors_iter(cell):
@@ -349,7 +388,7 @@ class Spreadsheet(object):
                 done.add(cell)
         print "Number of volatiles impacted by inputs: ", len(volatiles_concerned)
 
-        return volatiles_not_concerned, all_volatiles
+        return independent_volatiles, all_volatiles
 
 
     def find_volatile_arguments(self, outputs = None):
@@ -360,7 +399,7 @@ class Spreadsheet(object):
         # if outputs is None:
         # 1.1) from all cells
         for volatile in self.volatiles:
-            cell = self.cellmap[volatile]
+            cell = self.cells[volatile]
             if cell.formula:
                 all_volatiles.add((cell.formula, cell.address(), cell.sheet if cell.sheet is not None else None))
             else:
@@ -368,7 +407,7 @@ class Spreadsheet(object):
 
         # else:
         #     # 1.2) from the outputs while climbing up the tree
-        #     todo = [self.cellmap[output] for output in outputs]
+        #     todo = [self.cells[output] for output in outputs]
         #     done = set()
         #     while len(todo) > 0:
         #         cell = todo.pop()
@@ -448,42 +487,27 @@ class Spreadsheet(object):
                 arguments += [self.get_volatile_arguments_from_ast(ast, c, sheet)]
 
         return arguments
-
-
-    def dump_json(self, fname):
-        dump_json(self, fname)
-
-    def dump(self, fname):
-        dump(self, fname)
-
-    def loadGraph(self,fname):
-        (self.G, self.cellmap, self.named_ranges, self.volatiles, self.outputs, self.inputs) = load(fname) 
-        self.Range = RangeFactory(self.cellmap)
-
-    def load_json(self, fname):
-        (self.G, self.cellmap, self.named_ranges, self.volatiles, self.outputs, self.inputs) = load_json(fname) 
-        self.Range = RangeFactory(self.cellmap)
       
     
     def set_value(self, address, val):
 
         self.reset_buffer = set()
 
-        if address not in self.cellmap:
+        if address not in self.cells:
             raise Exception("Address not present in graph.")
 
         address = address.replace('$','')
-        cell = self.cellmap[address]
+        cell = self.cells[address]
 
         # when you set a value on cell, its should_eval flag is set to 'never' so its formula is not used until set free again => sp.activate_formula()
         self.fix_cell(address)
 
         # case where the address refers to a range
-        if self.cellmap[address].is_range: 
+        if self.cells[address].is_range: 
             cells_to_set = []
-            # for a in self.cellmap[address].range.addresses:
-                # if a in self.cellmap:
-                #     cells_to_set.append(self.cellmap[a])
+            # for a in self.cells[address].range.addresses:
+                # if a in self.cells:
+                #     cells_to_set.append(self.cells[a])
                 #     self.fix_cell(a)
 
             if type(val) != list:
@@ -497,8 +521,8 @@ class Spreadsheet(object):
             if address in self.named_ranges: # if the cell is a named range, we need to update and fix the reference cell
                 ref_address = self.named_ranges[address]
                 
-                if ref_address in self.cellmap:
-                    ref_cell = self.cellmap[ref_address]
+                if ref_address in self.cells:
+                    ref_cell = self.cells[ref_address]
                 else:
                     ref_cell = Cell(ref_address, None, value = val, formula = None, is_range = False, is_named_range = False )
                     self.add_cell(ref_cell)
@@ -515,7 +539,7 @@ class Spreadsheet(object):
                 cell.value = val
 
         for vol_range in self.volatiles: # reset all volatiles
-            self.reset(self.cellmap[vol_range])
+            self.reset(self.cells[vol_range])
 
     def reset(self, cell):
         addr = cell.address()
@@ -534,9 +558,9 @@ class Spreadsheet(object):
                 self.reset(child)
 
     def fix_cell(self, address):
-        if address in self.cellmap:
+        if address in self.cells:
             if address not in self.fixed_cells:
-                cell = self.cellmap[address]
+                cell = self.cells[address]
                 self.fixed_cells[address] = cell.should_eval
                 cell.should_eval = 'never'
         else:
@@ -545,7 +569,7 @@ class Spreadsheet(object):
     def free_cell(self, address = None):
         if address is None:
             for addr in self.fixed_cells:
-                cell = self.cellmap[addr]
+                cell = self.cells[addr]
 
                 cell.should_eval = 'always' # this is to be able to correctly reinitiliaze the value
                 if cell.python_expression is not None:
@@ -554,8 +578,8 @@ class Spreadsheet(object):
                 cell.should_eval = self.fixed_cells[addr]
             self.fixed_cells = {}
 
-        elif address in self.cellmap:
-            cell = self.cellmap[address]
+        elif address in self.cells:
+            cell = self.cells[address]
 
             cell.should_eval = 'always' # this is to be able to correctly reinitiliaze the value
             if cell.python_expression is not None:
@@ -567,14 +591,14 @@ class Spreadsheet(object):
             raise Exception('Cell %s not in cellmap' % address)
 
     def print_value_tree(self,addr,indent):
-        cell = self.cellmap[addr]
+        cell = self.cells[addr]
         print "%s %s = %s" % (" "*indent,addr,cell.value)
         for c in self.G.predecessors_iter(cell):
             self.print_value_tree(c.address(), indent+1)
 
     def build_volatile(self, volatile):
         if not isinstance(volatile, RangeCore):
-            vol_range = self.cellmap[volatile].range
+            vol_range = self.cells[volatile].range
         else:
             vol_range = volatile
 
@@ -586,7 +610,7 @@ class Spreadsheet(object):
     def build_volatiles(self):
 
         for volatile in self.volatiles:
-            vol_range = self.cellmap[volatile].range
+            vol_range = self.cells[volatile].range
 
             start = eval(vol_range.reference['start'])
             end = eval(vol_range.reference['end'])
@@ -601,9 +625,9 @@ class Spreadsheet(object):
         elif isinstance(addr2, ExcelError):
             return addr2
         else:
-            if addr1 in self.cellmap:
-                cell1 = self.cellmap[addr1]
-            else:
+            if addr1 in self.cells:
+                cell1 = self.cells[addr1]
+            elif addr2 is None:
                 if self.debug:
                     print 'WARNING in eval_ref: address %s not found in cellmap, returning #NULL' % addr1
                 return ExcelError('#NULL', 'Cell %s is empty' % addr1)
@@ -645,7 +669,9 @@ class Spreadsheet(object):
                     if '!' in addr2:
                         addr2 = addr2.split('!')[1]
 
-                    return self.Range('%s:%s' % (addr1, addr2))
+                    temp_range = self.Range('%s:%s' % (addr1, addr2))
+                    self.update_range(temp_range)
+                    return temp_range
             else:  # addr1 = Sheet1!A1, addr2 = Sheet1!A2
                 if '!' in addr1:
                     sheet = addr1.split('!')[0]
@@ -653,7 +679,9 @@ class Spreadsheet(object):
                     sheet = None
                 if '!' in addr2:
                     addr2 = addr2.split('!')[1]
-                return self.Range('%s:%s' % (addr1, addr2))
+                temp_range = self.Range('%s:%s' % (addr1, addr2))
+                self.update_range(temp_range)
+                return temp_range
 
     def update_range(self, range):
         # This function loops through its Cell references to evaluate the ones that need so
@@ -661,24 +689,17 @@ class Spreadsheet(object):
         
         debug = False
 
-        if range.name not in self.pending.keys():
-            self.pending[range.name] = []
-
         for index, key in enumerate(range.order):
             addr = get_cell_address(range.sheet, key)
-            if addr not in self.pending[range.name]:
-                self.pending[range.name].append(addr)
-
-                if self.cellmap[addr].need_update:
-                    new_value = self.evaluate(addr)
-
-        self.pending[range.name] = []
+         
+            if self.cells[addr].need_update:
+                new_value = self.evaluate(addr)
             
 
     def evaluate(self,cell,is_addr=True):
         if is_addr:
             try:
-                cell = self.cellmap[cell]
+                cell = self.cells[cell]
             except:
                 if self.debug:
                     print 'WARNING: Empty cell at ' + cell
@@ -746,11 +767,6 @@ class Spreadsheet(object):
     def gen_graph(self, inputs = [], outputs = []):
         print '___### Generating Graph ###___'
 
-        if not self.cells:
-            print "You need to load data from an Excel file first."
-            return
-
-
         if len(outputs) == 0:
             preseeds = set(list(flatten(self.cells.keys())) + self.named_ranges.keys()) # to have unicity
         else:
@@ -798,14 +814,14 @@ class Spreadsheet(object):
         print "Seeds %s cells" % len(seeds)
         outputs = set(preseeds) if len(outputs) > 0 else [] # seeds and outputs are the same when you don't specify outputs
 
-        cellmap, G = graph_from_seeds(seeds, self)
+        new_cells, G = graph_from_seeds(seeds, self)
 
-        if len(inputs) != 0: # otherwise, we'll set inputs to cellmap inside Spreadsheet
+        if len(inputs) != 0: # otherwise, we'll set inputs to new_cells inside Spreadsheet
             inputs = list(set(inputs))
 
             # add inputs that are outside of calculation chain
             for i in inputs:
-                if i not in cellmap:
+                if i not in new_cells:
                     if i in self.named_ranges:
                         reference = self.named_ranges[i]
                         if is_range(reference):
@@ -814,13 +830,13 @@ class Spreadsheet(object):
                             for address in rng.addresses: # this is avoid pruning deletion
                                 inputs.append(address)
                             virtual_cell = Cell(i, None, value = rng, formula = reference, is_range = True, is_named_range = True )
-                            cellmap[i] = virtual_cell
+                            new_cells[i] = virtual_cell
                             G.add_node(virtual_cell) # edges are not needed here since the input here is not in the calculation chain
 
                         else:
                             # might need to be changed to actual self.cells Cell, not a copy
                             virtual_cell = Cell(i, None, value = self.cells[reference].value, formula = reference, is_range = False, is_named_range = True)
-                            cellmap[i] = virtual_cell
+                            new_cells[i] = virtual_cell
                             G.add_node(virtual_cell) # edges are not needed here since the input here is not in the calculation chain
                     else:
                         if is_range(i):
@@ -828,16 +844,16 @@ class Spreadsheet(object):
                             for address in rng.addresses: # this is avoid pruning deletion
                                 inputs.append(address)
                             virtual_cell = Cell(i, None, value = rng, formula = o, is_range = True, is_named_range = True )
-                            cellmap[i] = virtual_cell
+                            new_cells[i] = virtual_cell
                             G.add_node(virtual_cell) # edges are not needed here since the input here is not in the calculation chain
                         else:
-                            cellmap[i] = self.cells[i]
+                            new_cells[i] = self.cells[i]
                             G.add_node(self.cells[i]) # edges are not needed here since the input here is not in the calculation chain
 
             inputs = set(inputs)
 
         self.G = G
-        self.cellmap = cellmap
+        self.cells = new_cells
 
-        print "Graph construction done, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()),len(G.edges()),len(cellmap))
+        print "Graph construction done, %s nodes, %s edges, %s new_cells entries" % (len(G.nodes()),len(G.edges()),len(new_cells))
 
