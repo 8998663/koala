@@ -69,7 +69,7 @@ class ASTNode(object):
             return False      
 
 
-    def emit(self,ast,context=None, volatile = False):
+    def emit(self,ast,context=None, volatile = False, debug = False):
         """Emit code"""
         self.token.tvalue
     
@@ -99,7 +99,7 @@ class OperatorNode(ASTNode):
             "<=": "is_inferior_or_equal"
         }
 
-    def emit(self,ast,context=None, volatile = False):
+    def emit(self,ast,context=None, volatile = False, debug = False):
         xop = self.tvalue
         
         # Get the arguments
@@ -154,7 +154,7 @@ class OperatorNode(ASTNode):
 class OperandNode(ASTNode):
     def __init__(self,*args):
         super(OperandNode,self).__init__(*args)
-    def emit(self,ast,context=None, volatile = False):
+    def emit(self,ast,context=None, volatile = False, debug = False):
         t = self.tsubtype
         
         if t == "logical":
@@ -176,7 +176,7 @@ class RangeNode(OperandNode):
     def get_cells(self):
         return resolve_range(self.tvalue)[0]
     
-    def emit(self,ast,context=None, volatile = False):
+    def emit(self,ast,context=None, volatile = False, debug = False):
         if isinstance(self.tvalue, ExcelError):
             if self.debug:
                 print 'WARNING: Excel Error Code found', self.tvalue
@@ -273,7 +273,7 @@ class FunctionNode(ASTNode):
         # map  excel functions onto their python equivalents
         self.funmap = FUNCTION_MAP
         
-    def emit(self,ast,context=None, volatile = False):
+    def emit(self,ast,context=None, volatile = False, debug = False):
         fun = self.tvalue.lower()
 
         # Get the arguments

@@ -36,7 +36,7 @@ class Operator:
         self.precedence = precedence
         self.associativity = associativity
 
-def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False):
+def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False, debug = False):
     """
     Tokenize an excel formula expression into reverse polish notation
     
@@ -186,7 +186,7 @@ def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False):
     for t in tokens:
 
         if t.ttype == "operand":
-            output.append(create_node(t, ref))
+            output.append(create_node(t, ref, debug))
             if were_values:
                 were_values.pop()
                 were_values.append(True)
@@ -202,7 +202,7 @@ def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False):
         elif t.ttype == "argument":
 
             while stack and (stack[-1].tsubtype != "start"):
-                output.append(create_node(stack.pop(), ref))   
+                output.append(create_node(stack.pop(), ref, debug))   
             
             if were_values.pop(): arg_count[-1] += 1
             were_values.append(False)
@@ -227,7 +227,7 @@ def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False):
                 if ( (o1.associativity == "left" and o1.precedence <= o2.precedence)
                         or
                       (o1.associativity == "right" and o1.precedence < o2.precedence) ):
-                    output.append(create_node(stack.pop(), ref))
+                    output.append(create_node(stack.pop(), ref, debug))
                 else:
                     break
             stack.append(t)
@@ -238,14 +238,14 @@ def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False):
         elif t.tsubtype == "stop":
 
             while stack and stack[-1].tsubtype != "start":
-                output.append(create_node(stack.pop(), ref))
+                output.append(create_node(stack.pop(), ref, debug))
             
             if not stack:
                 raise Exception("Mismatched or misplaced parentheses")
             stack.pop()
 
             if stack and stack[-1].ttype == "function":
-                f = create_node(stack.pop(), ref)
+                f = create_node(stack.pop(), ref, debug)
                 a = arg_count.pop()
                 w = were_values.pop()
                 if w: a += 1
@@ -259,7 +259,7 @@ def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False):
         if (stack[-1].tsubtype == "start" or stack[-1].tsubtype == "stop"):
             raise Exception("Mismatched or misplaced parentheses")
         
-        output.append(create_node(stack.pop(), ref))
+        output.append(create_node(stack.pop(), ref, debug))
 
     # convert to list
     return [x for x in output]
@@ -352,11 +352,10 @@ def make_subgraph(G, seed, direction = "ascending"):
     return subgraph
 
 
-def cell2code(cell, named_ranges):
+def cell2code(cell, named_ranges, debug=False):
     """Generate python code for the given cell"""
     if cell.formula:
 
-        debug = False
         # if 'OFFSET' in cell.formula or 'INDEX' in cell.formula:
         #     debug = True
         # if debug:
@@ -365,9 +364,9 @@ def cell2code(cell, named_ranges):
         ref = parse_cell_address(cell.address()) if not cell.is_named_range else None
         sheet = cell.sheet
 
-        e = shunting_yard(cell.formula, named_ranges, ref=ref, tokenize_range = False)
+        e = shunting_yard(cell.formula, named_ranges, ref=ref, tokenize_range = False, debug=debug)
         
-        ast,root = build_ast(e, debug = debug)
+        ast,root = build_ast(e)
         code = root.emit(ast, context=sheet)
 
         # print 'CODE', code, ref
@@ -404,7 +403,7 @@ def prepare_volatile(code, names, ref_cell = None):
 
         e = shunting_yard(formula, names, ref = ref, tokenize_range = False)
         debug = False
-        ast,root = build_ast(e, debug = debug)
+        ast,root = build_ast(e)
         code = root.emit(ast, context = sheet, volatile = True)
 
         return code

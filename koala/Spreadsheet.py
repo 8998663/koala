@@ -210,7 +210,7 @@ class Spreadsheet(object):
 
         return Spreadsheet(subgraph, new_cellmap, self.named_ranges, self.volatiles, self.outputs, self.inputs, debug = self.debug)
 
-    def clean_volatile(self, with_cache = True):
+    def clean_volatile(self, subset, with_cache = True):
         print '___### Cleaning Volatiles ###___'
         # with_cache = False
 
@@ -233,15 +233,21 @@ class Spreadsheet(object):
                     self.cellmap[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
         
         ### 2) gather all occurence of volatile functions in cells or named_range
+        # if len(subset) == 0:
         all_volatiles = set()
 
-        for volatile_name in self.volatile_to_remove:
-            for k,v in self.named_ranges.items():
-                if volatile_name in v:
-                    all_volatiles.add((v, k, None))
-            for k,cell in self.cellmap.items():
-                if cell.formula and volatile_name in cell.formula:
-                    all_volatiles.add((cell.formula, cell.address(), cell.sheet))
+        # for volatile_name in self.volatile_to_remove:
+        #     for k,v in self.named_ranges.items():
+        #         if volatile_name in v:
+        #             all_volatiles.add((v, k, None))
+        #     for k,cell in self.cellmap.items():
+        #         if cell.formula and volatile_name in cell.formula:
+        #             all_volatiles.add((cell.formula, cell.address(), cell.sheet)) 
+        # print "ALL 2, ", len(all_volatiles)
+        # # for a in subset:
+        #     if a not in all_volatiles:
+        #         print "===>", a       
+
 
             # print "%s %s to parse" % (str(len(all_volatiles)), volatile_name)
 
@@ -249,7 +255,7 @@ class Spreadsheet(object):
         if with_cache:
             cache = {} # formula => new_formula
         
-        for formula, address, sheet in all_volatiles:
+        for formula, address, sheet in subset:
 
             if with_cache and formula in cache:
                 # print 'Retrieving', cell["address"], cell["formula"], cache[cell["formula"]]
@@ -259,10 +265,13 @@ class Spreadsheet(object):
                     parsed = parse_cell_address(address)
                 else:
                     parsed = ""
-                e = shunting_yard(formula, self.named_ranges, ref=parsed, tokenize_range = True)
+                e = shunting_yard(formula, self.named_ranges, ref=parsed)
                 ast,root = build_ast(e)
                 code = root.emit(ast)
-                
+                # print "============"
+                # print address, sheet, formula
+                # for c in self.G.successors(self.cellmap[address]):
+                #     print "    ", c.address()
                 cell = {"formula": formula, "address": address, "sheet": sheet}
                 replacements = self.eval_volatiles_from_ast(ast, root, cell)
 
@@ -304,7 +313,7 @@ class Spreadsheet(object):
 
         if (node.token.tvalue == "INDEX" or node.token.tvalue == "OFFSET"):
             volatile_string = reverse_rpn(node, ast)
-            expression = node.emit(ast, context=context)
+            expression = node.emit(ast, context=context, debug = True)
 
             if expression.startswith("self.eval_ref"):
                 expression_type = "value"
@@ -327,7 +336,7 @@ class Spreadsheet(object):
 
     def detect_alive(self, inputs = None, outputs = None):
 
-        volatile_arguments = self.find_volatile_arguments(outputs)
+        volatile_arguments, all_volatiles = self.find_volatile_arguments(outputs)
 
         if inputs is None:
             inputs = self.inputs
@@ -335,56 +344,75 @@ class Spreadsheet(object):
         # go down the tree and list all cells that are volatile arguments
         todo = [self.cellmap[input] for input in inputs]
         done = set()
-        alive = set()
+
+        volatiles_concerned = set()
 
         while len(todo) > 0:
             cell = todo.pop()
 
             if cell not in done:
-                if cell.address() in volatile_arguments:
-                    alive.add(cell.address())
+                if cell.address() in volatile_arguments.keys():
+                    for vc in volatile_arguments[cell.address()]:
+                        volatiles_concerned.add(vc)
+                        try:
+                            all_volatiles.remove(vc)
+                        except:
+                            pass
 
                 for child in self.G.successors_iter(cell):
                     todo.append(child)
   
                 done.add(cell)
-        return alive
+        print "Number of volatiles concerned: ", len(volatiles_concerned)
+
+        return volatiles_concerned, all_volatiles
 
 
     def find_volatile_arguments(self, outputs = None):
-        
+
         # 1) gather all occurence of volatile 
         all_volatiles = set()
 
-        if outputs is None:
-            # 1.1) from all cells
-            for volatile_name in self.volatile_to_remove:
-                for k, cell in self.cellmap.items():
-                    if cell.formula and volatile_name in cell.formula:
-                        all_volatiles.add((cell.formula, cell.address(), cell.sheet))
+        # if outputs is None:
+        # 1.1) from all cells
+        for volatile in self.volatiles:
+            cell = self.cellmap[volatile]
+            if cell.formula:
+                all_volatiles.add((cell.formula, cell.address(), cell.sheet if cell.sheet is not None else None))
+            else:
+                raise Exception('Volatiles should always have a formula')
 
-        else:
-            # 1.2) from the outputs while climbing up the tree
-            todo = [self.cellmap[output] for output in outputs]
-            done = set()
-            while len(todo) > 0:
-                cell = todo.pop()
+        # for volatile_name in self.volatile_to_remove:
+        #     for k,v in self.named_ranges.items():
+        #         if volatile_name in v:
+        #             all_volatiles.add((v, k, None))
+        #     for k,cell in self.cellmap.items():
+        #         if cell.formula and volatile_name in cell.formula:
+        #             all_volatiles.add((cell.formula, cell.address(), cell.sheet))
+        print "ALL 1, ", len(all_volatiles)
+        # else:
+        #     # 1.2) from the outputs while climbing up the tree
+        #     todo = [self.cellmap[output] for output in outputs]
+        #     done = set()
+        #     while len(todo) > 0:
+        #         cell = todo.pop()
 
-                if cell not in done:
-                    if cell.address() in self.volatiles:
-                        if cell.formula:
-                            all_volatiles.add((cell.formula, cell.address(), cell.sheet if cell.sheet is not None else None))
-                        else:
-                            raise Exception('Volatiles should always have a formula')
+        #         if cell not in done:
+        #             if cell.address() in self.volatiles:
+        #                 if cell.formula:
+        #                     all_volatiles.add((cell.formula, cell.address(), cell.sheet if cell.sheet is not None else None))
+        #                 else:
+        #                     raise Exception('Volatiles should always have a formula')
 
-                    for parent in self.G.predecessors_iter(cell): # climb up the tree      
-                        todo.append(parent)
+        #             for parent in self.G.predecessors_iter(cell): # climb up the tree      
+        #                 todo.append(parent)
 
-                    done.add(cell)
+        #             done.add(cell)
+        print "Total number of volatiles ", len(all_volatiles)
 
         # 2) extract the arguments from these volatiles
         done = set()
-        volatile_arguments = set()
+        volatile_arguments = {}
 
         #print 'All vol %i / %i' % (len(all_volatiles), len(self.volatiles))
 
@@ -399,11 +427,14 @@ class Spreadsheet(object):
                 code = root.emit(ast)
                 
                 for a in list(flatten(self.get_volatile_arguments_from_ast(ast, root, sheet))):
-                    volatile_arguments.add(a)
+                    if a in volatile_arguments:
+                        volatile_arguments[a].append((formula, address, sheet))
+                    else:
+                        volatile_arguments[a] = [(formula, address, sheet)]
 
-                done.add(formula)
-            
-        return volatile_arguments
+                done.add(formula) 
+
+        return volatile_arguments, all_volatiles
 
 
     def get_arguments_from_ast(self, ast, node, sheet):

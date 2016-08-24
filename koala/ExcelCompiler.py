@@ -36,10 +36,14 @@ class ExcelCompiler(object):
         self.volatiles = set()
         self.debug = debug
 
-    def clean_volatile(self):
-        sp = Spreadsheet(networkx.DiGraph(),self.cells, self.named_ranges, debug = self.debug)
+    def clean_volatile(self, subset, orig_sp):
+        G = orig_sp.G
+        cells = orig_sp.cellmap
+        named_ranges = orig_sp.named_ranges
 
-        cleaned_cells, cleaned_ranged_names = sp.clean_volatile()
+        sp = Spreadsheet(G,cells, named_ranges, debug = self.debug)
+
+        cleaned_cells, cleaned_ranged_names = sp.clean_volatile(subset)
         self.cells = cleaned_cells
         self.named_ranges = cleaned_ranged_names
         self.volatiles = set()
