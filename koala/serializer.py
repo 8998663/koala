@@ -187,8 +187,12 @@ def load(fname):
             edges.append((cellmap[source], cellmap[target]))
         elif mode == "outputs":
             outputs = line.split(SEP)
+            if outputs == [""]:
+                outputs = []
         elif mode == "inputs":
             inputs = line.split(SEP)
+            if inputs == [""]:
+                inputs = []
         elif mode == "named_ranges":
             k,v = line.split(SEP)
             named_ranges[k] = v
