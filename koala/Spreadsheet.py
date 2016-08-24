@@ -281,10 +281,10 @@ class Spreadsheet(object):
                 old_cell = self.cellmap[address]
                 new_cells[address] = Cell(old_cell.address(), old_cell.sheet, value=old_cell.value, formula=new_formula, is_range = old_cell.is_range, is_named_range=old_cell.is_named_range, should_eval=old_cell.should_eval)
         
-
         self.cells = new_cells
+        self.Range = RangeFactory(self.cells)
         self.named_ranges = new_named_ranges
-        self.volatiles = self.volatiles.difference_update(volatiles)
+        self.volatiles = self.volatiles.difference(volatiles)
 
 
     def print_value_ast(self, ast,node,indent):

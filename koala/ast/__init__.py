@@ -429,11 +429,13 @@ def graph_from_seeds(seeds, cell_source):
 
     """
 
-    cellmap = cell_source.cellmap if cell_source.cellmap  else dict([(x.address(),x) for x in seeds])
-    cells = cell_source.cells
-    G = networkx.DiGraph()
-    # match the info in cellmap
-    for c in cellmap.itervalues(): G.add_node(c)
+    # cellmap = cell_source.cellmap
+    # cells = cellmap
+    # G = cell_source.G
+    # for c in seeds: 
+    #     G.add_node(c)
+    #     cellmap[c.address()] = c
+
 
     # # when called from Spreadsheet instance, use the Spreadsheet cellmap and graph 
     # if hasattr(cell_source, 'G'): # ~ cell_source is a Spreadsheet
@@ -445,12 +447,12 @@ def graph_from_seeds(seeds, cell_source):
     #         cellmap[c.address()] = c
     # # when called from ExcelCompiler instance, construct cellmap and graph from seeds 
     # else: # ~ cell_source is a ExcelCompiler
-    #     cellmap = dict([(x.address(),x) for x in seeds])
-    #     cells = cell_source.cells
-    #     # directed graph
-    #     G = networkx.DiGraph()
-    #     # match the info in cellmap
-    #     for c in cellmap.itervalues(): G.add_node(c)
+    cellmap = dict([(x.address(),x) for x in seeds])
+    cells = cell_source.cells
+    # directed graph
+    G = networkx.DiGraph()
+    # match the info in cellmap
+    for c in cellmap.itervalues(): G.add_node(c)
 
     # cells to analyze: only formulas
     todo = [s for s in seeds if s.formula]
