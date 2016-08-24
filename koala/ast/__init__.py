@@ -59,7 +59,7 @@ def shunting_yard(expression, named_ranges, ref = None, tokenize_range = False, 
     if expression.startswith('='):
         expression = expression[1:]
             
-    p = ExcelParser(tokenize_range = tokenize_range);
+    p = ExcelParser(tokenize_range = tokenize_range); # tokenize_range is usefull if you want to evaluate raw volatiles (not used anymore)
     p.parse(expression)
 
     # insert tokens for '(' and ')', to make things clearer below
@@ -352,7 +352,7 @@ def make_subgraph(G, seed, direction = "ascending"):
     return subgraph
 
 
-def cell2code(cell, named_ranges, debug=False):
+def cell2code(cell, named_ranges, debug = False):
     """Generate python code for the given cell"""
     if cell.formula:
 
@@ -364,7 +364,7 @@ def cell2code(cell, named_ranges, debug=False):
         ref = parse_cell_address(cell.address()) if not cell.is_named_range else None
         sheet = cell.sheet
 
-        e = shunting_yard(cell.formula, named_ranges, ref=ref, tokenize_range = False, debug=debug)
+        e = shunting_yard(cell.formula, named_ranges, ref=ref, debug = debug)
         
         ast,root = build_ast(e)
         code = root.emit(ast, context=sheet)
