@@ -210,7 +210,7 @@ class Spreadsheet(object):
 
         return Spreadsheet(subgraph, new_cellmap, self.named_ranges, self.volatiles, self.outputs, self.inputs, debug = self.debug)
 
-    def clean_volatile(self, subset):
+    def clean_volatile(self, volatiles):
         print '___### Cleaning Volatiles ###___'
 
         new_named_ranges = self.named_ranges.copy()
@@ -231,28 +231,9 @@ class Spreadsheet(object):
                 else:
                     self.cellmap[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
         
-        ### 2) gather all occurence of volatile functions in cells or named_range
-        # if len(subset) == 0:
-        all_volatiles = set()
-
-        # for volatile_name in self.volatile_to_remove:
-        #     for k,v in self.named_ranges.items():
-        #         if volatile_name in v:
-        #             all_volatiles.add((v, k, None))
-        #     for k,cell in self.cellmap.items():
-        #         if cell.formula and volatile_name in cell.formula:
-        #             all_volatiles.add((cell.formula, cell.address(), cell.sheet)) 
-        # print "ALL 2, ", len(all_volatiles)
-        # # for a in subset:
-        #     if a not in all_volatiles:
-        #         print "===>", a       
-
-
-            # print "%s %s to parse" % (str(len(all_volatiles)), volatile_name)
-
-        ### 3) evaluate all volatiles
-        
-        for formula, address, sheet in subset:
+       
+        ### 2) evaluate all volatiles
+        for formula, address, sheet in volatiles:
 
             if sheet:
                 parsed = parse_cell_address(address)
@@ -324,6 +305,8 @@ class Spreadsheet(object):
 
         volatile_arguments, all_volatiles = self.find_volatile_arguments(outputs)
 
+        volatiles_not_concerned = all_volatiles.copy()
+
         if inputs is None:
             inputs = self.inputs
 
@@ -341,7 +324,7 @@ class Spreadsheet(object):
                     for vc in volatile_arguments[cell.address()]:
                         volatiles_concerned.add(vc)
                         try:
-                            all_volatiles.remove(vc)
+                            volatiles_not_concerned.remove(vc)
                         except:
                             pass
 
@@ -351,7 +334,7 @@ class Spreadsheet(object):
                 done.add(cell)
         print "Number of volatiles concerned: ", len(volatiles_concerned)
 
-        return volatiles_concerned, all_volatiles
+        return volatiles_not_concerned, all_volatiles
 
 
     def find_volatile_arguments(self, outputs = None):
@@ -368,14 +351,6 @@ class Spreadsheet(object):
             else:
                 raise Exception('Volatiles should always have a formula')
 
-        # for volatile_name in self.volatile_to_remove:
-        #     for k,v in self.named_ranges.items():
-        #         if volatile_name in v:
-        #             all_volatiles.add((v, k, None))
-        #     for k,cell in self.cellmap.items():
-        #         if cell.formula and volatile_name in cell.formula:
-        #             all_volatiles.add((cell.formula, cell.address(), cell.sheet))
-        print "ALL 1, ", len(all_volatiles)
         # else:
         #     # 1.2) from the outputs while climbing up the tree
         #     todo = [self.cellmap[output] for output in outputs]
@@ -399,8 +374,6 @@ class Spreadsheet(object):
         # 2) extract the arguments from these volatiles
         done = set()
         volatile_arguments = {}
-
-        #print 'All vol %i / %i' % (len(all_volatiles), len(self.volatiles))
 
         for formula, address, sheet in all_volatiles:
             if formula not in done:
