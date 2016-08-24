@@ -85,7 +85,7 @@ class Spreadsheet(object):
         if addr in self.cellmap:
             raise Exception('Cell %s already in cellmap' % addr)
 
-        cellmap, G = graph_from_seeds([cell], self)
+        cellmap, G = graph_from_seeds([cell], self, update = True)
 
         self.cellmap = cellmap
         self.G = G
@@ -319,12 +319,11 @@ class Spreadsheet(object):
         return list(flatten(results, only_lists = True))
 
 
-    def detect_alive(self):
+    def detect_alive(self, inputs = [], outputs = []):
 
-        volatile_arguments, all_volatiles = self.find_volatile_arguments(self.outputs)
+        volatile_arguments, all_volatiles = self.find_volatile_arguments(outputs)
 
         volatiles_not_concerned = all_volatiles.copy()
-        inputs = self.inputs
 
         # go down the tree and list all cells that are volatile arguments
         todo = [self.cellmap[input] for input in inputs]
@@ -743,15 +742,14 @@ class Spreadsheet(object):
 
         return cell.value
 
-    def gen_graph(self):
+
+    def gen_graph(self, inputs = [], outputs = []):
         print '___### Generating Graph ###___'
 
         if not self.cells:
             print "You need to load data from an Excel file first."
             return
 
-        outputs = self.outputs
-        inputs = self.inputs
 
         if len(outputs) == 0:
             preseeds = set(list(flatten(self.cells.keys())) + self.named_ranges.keys()) # to have unicity
