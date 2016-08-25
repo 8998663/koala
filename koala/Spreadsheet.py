@@ -222,52 +222,59 @@ class Spreadsheet(object):
         self.G = subgraph
         self.cells = new_cellmap
 
-    def fix_volatiles(self, volatiles):
+    def fix_volatiles(self, volatiles_to_fix):
         print '___### Fix Volatiles ###___'
 
-        new_named_ranges = self.named_ranges.copy()
-        new_cells = self.cells.copy()
+        new_named_ranges = {}
+        new_cells = {}
 
-        ### 1) create ranges
-        for n in self.named_ranges:
-            reference = self.named_ranges[n]
-            if is_range(reference):
-                if 'OFFSET' not in reference:
-                    my_range = self.Range(reference)
-                    self.cells[n] = Cell(n, None, value = my_range, formula = reference, is_range = True, is_named_range = True )
-                else:
-                    self.cells[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
-            else:
-                if reference in self.cells:
-                    self.cells[n] = Cell(n, None, value = self.cells[reference].value, formula = reference, is_range = False, is_named_range = True )
-                else:
-                    self.cells[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
+        # ### 1) create ranges
+        # for n in self.named_ranges:
+        #     reference = self.named_ranges[n]
+        #     if is_range(reference):
+        #         if 'OFFSET' not in reference:
+        #             my_range = self.Range(reference)
+        #             self.cells[n] = Cell(n, None, value = my_range, formula = reference, is_range = True, is_named_range = True )
+        #         else:
+        #             self.cells[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
+        #     else:
+        #         if reference in self.cells:
+        #             self.cells[n] = Cell(n, None, value = self.cells[reference].value, formula = reference, is_range = False, is_named_range = True )
+        #         else:
+        #             self.cells[n] = Cell(n, None, value = None, formula = reference, is_range = False, is_named_range = True )
         
-       
-        ### 2) evaluate all volatiles
-        for formula, address, sheet in volatiles:
+        # remove all volatile ranges from cells because they will refer to unnecessary nodes after
+        # the ones we still need will be recreated during graph generation
+        new_volatiles = self.volatiles.copy()
+        for volatile_name in self.volatiles:
+            volatile_cell = self.cells[volatile_name]
+            if volatile_cell.is_range:
+                new_volatiles.remove(volatile_name)
+                del self.cells[volatile_name]
+                try:
+                    volatiles_to_fix.remove((volatile_cell.formula, volatile_cell.address(), volatile_cell.sheet))
+                except:
+                    pass
+        for formula, address, sheet in volatiles_to_fix:
 
-            debug = False
-            if 'index(resolve_range(self.named_ranges["CA_CapexFacilTopsides"]),1,1):index(resolve_range(self.named_ranges["CA_CapexFacilOther"]),1,self.eval_ref("CA_Periods", ref = (22, "AY")))' in formula:
-                debug = True
-                print 'len', len(replacements)
 
+            new_volatiles.remove(address)
 
             if sheet:
                 parsed = parse_cell_address(address)
             else:
-                successor = self.G.successors(self.cells[address])[0]
-                parsed = parse_cell_address(successor.address())
-                sheet = successor.sheet
+                try:
+                    successor = self.G.successors(self.cells[address])[0]
+                    parsed = parse_cell_address(successor.address())
+                    sheet = successor.sheet
+                except Exception as e:
+                    print e
+                    parsed = ""
             e = shunting_yard(formula, self.named_ranges, ref = parsed, tokenize_range = True)
             ast,root = build_ast(e)
-            code = root.emit(ast)
-            # print "============"
-            # print address, sheet, formula
-            # for c in self.G.successors(self.cells[address]):
-            #     print "    ", c.address()
+            # code = root.emit(ast)
             cell = {"formula": formula, "address": address, "sheet": sheet}
-            replacements = self.eval_volatiles_from_ast(ast, root, cell, debug)
+            replacements = self.eval_volatiles_from_ast(ast, root, cell)
 
 
             new_formula = formula
@@ -278,21 +285,14 @@ class Spreadsheet(object):
                             print 'WARNING: Excel error found => replacing with #N/A'
                         repl["value"] = "#N/A"
 
-                    if debug:
-                        print 'exprtype', repl["expression_type"]
-
                     if repl["expression_type"] == "value":
-                        if debug:
-                            print 'Value', repl["value"]
                         new_formula = new_formula.replace(repl["formula"], str(repl["value"]))
                     else:
-                        if debug:
-                            print 'Value', repl["value"]
                         new_formula = new_formula.replace(repl["formula"], repl["value"])
             else:
                 new_formula = None
 
-            if debug:
+            if False:
                 print 'Old', formula
                 print 'new', new_formula
 
@@ -310,7 +310,7 @@ class Spreadsheet(object):
                 cell.compile()
                 new_cells[address] = cell
 
-        return new_cells, new_named_ranges
+        return new_cells, new_named_ranges, new_volatiles
 
 
     def print_value_ast(self, ast,node,indent):
@@ -348,18 +348,39 @@ class Spreadsheet(object):
                 results.append(self.eval_volatiles_from_ast(ast, c, cell))
         return list(flatten(results, only_lists = True))
 
-    def reduce(self, inputs = [], outputs = []):
+    def reduce(self, inputs = [], outputs = [], original_cells = None, original_nr = None):
         independent_volatiles, all_volatiles = self.detect_alive(inputs, outputs)
-        new_cells, new_named_ranges = self.fix_volatiles(independent_volatiles)
-        self.cells = new_cells
-        self.named_ranges = new_named_ranges
-        for iv in independent_volatiles:
-            self.volatiles.remove(iv[1])
-        self.Range = RangeFactory(new_cells)
+        new_cells, new_named_ranges, new_volatiles = self.fix_volatiles(independent_volatiles)
+
+        for address,cell in self.cells.items():
+            if cell.is_range:
+                del self.cells[address]
+        
+        for address,new_cell in new_cells.items():
+            # print "==============="
+            # print address
+            # print original_cells[address].formula
+            # print new_cell.formula
+            original_cells[address] = new_cell
+        for address,new_cell in new_named_ranges.items():
+            original_nr[address] = new_cell
+        self.cells = original_cells
+        self.named_ranges = original_nr
+        self.volatiles = new_volatiles    
+        self.Range = RangeFactory(self.cells)
+        self.G = None
+        self.gen_graph(inputs, outputs)
+        # new_cells, G = graph_from_seeds(map(lambda x: self.cells[x], outputs), self)
+        # print "Graph construction done, %s nodes, %s edges, %s new_cells entries" % (len(G.nodes()),len(G.edges()),len(new_cells))
+
 
     def detect_alive(self, inputs = [], outputs = []):
 
         volatile_arguments, all_volatiles = self.find_volatile_arguments(outputs)
+
+        # for arg in volatile_arguments:
+        #     if arg in self.cells and self.cells[arg].is_range:
+        #         del self.cell[arg]
 
         independent_volatiles = all_volatiles.copy()
 
@@ -538,8 +559,8 @@ class Spreadsheet(object):
                 # set the value
                 cell.value = val
 
-        for vol_range in self.volatiles: # reset all volatiles
-            self.reset(self.cells[vol_range])
+        for volatile in self.volatiles: # reset all volatiles
+            self.reset(self.cells[volatile])
 
     def reset(self, cell):
         addr = cell.address()
@@ -691,9 +712,9 @@ class Spreadsheet(object):
 
         for index, key in enumerate(range.order):
             addr = get_cell_address(range.sheet, key)
-         
+            a = self.cells[addr]
             if self.cells[addr].need_update:
-                new_value = self.evaluate(addr)
+                self.evaluate(addr)
             
 
     def evaluate(self,cell,is_addr=True):
@@ -751,9 +772,9 @@ class Spreadsheet(object):
                                 self.history['ROOT_DIFF'] = self.history[cell.address()]
                                 self.history['ROOT_DIFF']['cell'] = cell.address()
 
-                    self.history[cell.address()]['new'] = str(cell.value)
+                    self.history[cell.address()]['new'] = cell.value
                 else:
-                    self.history[cell.address()] = {'new': str(cell.value)}
+                    self.history[cell.address()] = {'new': cell.value}
 
         except Exception as e:
             if e.message is not None and e.message.startswith("Problem evalling"):
@@ -765,7 +786,9 @@ class Spreadsheet(object):
 
 
     def gen_graph(self, inputs = [], outputs = []):
-        print '___### Generating Graph ###___'
+        print '___### Generating Graph ###___', len(self.cells),len(self.named_ranges), len(self.volatiles)
+        # for address,cell in self.cells.items():
+        #     print address, cell.formula
 
         if len(outputs) == 0:
             preseeds = set(list(flatten(self.cells.keys())) + self.named_ranges.keys()) # to have unicity
@@ -787,8 +810,7 @@ class Spreadsheet(object):
                     else:
                         rng = self.Range(reference)
 
-                    # rng = self.Range(reference)
-                    for address in rng.addresses: # this is avoid pruning deletion
+                    for address in rng.addresses:
                         preseeds.append(address)
                     virtual_cell = Cell(o, None, value = rng, formula = reference, is_range = True, is_named_range = True )
                     seeds.append(virtual_cell)

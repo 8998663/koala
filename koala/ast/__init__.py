@@ -433,6 +433,7 @@ def graph_from_seeds(seeds, spreadsheet):
     volatiles = spreadsheet.volatiles
 
     if G:
+        new_cells = spreadsheet.cells
         for c in seeds: 
             G.add_node(c)
             cells[c.address()] = c
@@ -460,34 +461,13 @@ def graph_from_seeds(seeds, spreadsheet):
         c1.python_expression = pystr.replace('"', "'") # compilation is done later
         
         if 'OFFSET' in c1.formula or 'INDEX' in c1.formula:
-            if c1.address() not in names: # volatiles names already treated in ExcelCompiler
+            if c1.address() not in names:
                 volatiles.add(c1.address())
 
         # get all the cells/ranges this formula refers to
         deps = [x for x in ast.nodes() if isinstance(x,RangeNode)]
         # remove dupes
         deps = uniqueify(deps)
-
-        ###### 2) connect dependencies in cells in graph ####################
-
-        # ### LOG
-        # tmp = []
-        # for dep in deps:
-        #     if dep not in names:
-        #         if "!" not in dep and cursheet != None:
-        #             dep = cursheet + "!" + dep
-        #     if dep not in new_cells:
-        #         tmp.append(dep)
-        # #deps = tmp
-        # logStep = "%s %s = %s " % ('|'*step, c1.address(), '',)
-        # print logStep
-
-        # if len(deps) > 1 and 'L' in deps[0] and deps[0] == deps[-1].replace('DG','L'):
-        #     print logStep, "[%s...%s]" % (deps[0], deps[-1])
-        # elif len(deps) > 0:
-        #     print logStep, "->", deps
-        # else:
-        #     print logStep, "done"
 
         for dep in deps:
             dep_name = dep.tvalue.replace('$','')
